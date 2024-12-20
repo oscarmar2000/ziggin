@@ -1,11 +1,5 @@
 const std = @import("std");
 
-// const vector = std.build.Pkg{
-//     .name = "vector",
-//     .source = .{ .path = "vector.zig" },
-//     .dependencies = &[_]std.build.Pkg{},
-// };
-
 pub fn build(b: *std.Build) void {
     const exe = b.addExecutable(.{
         .name = "ziggin",

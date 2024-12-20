@@ -4,37 +4,23 @@ const std = @import("std");
 const print = std.debug.print;
 
 const vector = @import("vector").vector;
-
 const ncw = @import("ncurses_wrapper").ncw;
 const nc = @import("ncurses_wrapper").nc;
 
+// 2d Point type
 const Pt = struct {
     x: i32,
     y: i32,
     fn addTo(self: *Pt, p: Pt) void {
         self.x += p.x;
         self.y += p.y;
-        //        return Pt{ .x = self.x, .y = self.y };
     }
     fn add(p1: Pt, p2: Pt) Pt {
         return Pt{ .x = p1.x + p2.x, .y = p1.y + p2.y };
     }
 };
 
-pub fn vadd(T: type, v1: vector(T), v2: vector(T), vout: *vector(T)) !void {
-    for (0..v1.len()) |i| {
-        try vout.push(Pt.add((try v1.at(i)).*, (try v2.at(i)).*));
-    }
-}
-
-pub fn vapply(T: type, v: vector(T), vout: *vector(T), ap: (fn (T) ?T)) !void {
-    for (0..v.len()) |i| {
-        const nval = ap((try v.at(i)).*);
-        if (nval != null)
-            try vout.push(nval.?);
-    }
-}
-
+// Animation handling
 const Anim = struct {
     base: Pt = undefined,
     pts: vector(Pt) = undefined,
@@ -44,10 +30,16 @@ const Anim = struct {
     alloc: std.mem.Allocator = undefined,
     incs: vector(Pt) = undefined,
 
+    // update animation
     fn nextStep(self: *Anim) !bool {
+        try draw(self.pts, ' ');
         if (self.steps > 0) {
             self.steps -= 1;
-            try draw(self.pts, ' ');
+
+            if (self.steps == 0) {
+                self.pts.clear();
+                return false;
+            }
 
             const old_col = ncw.col;
             try ncw.col_set(self.color);
@@ -74,12 +66,11 @@ const Anim = struct {
             try ncw.col_set(old_col);
 
             return true;
-        } else {
-            try draw(self.pts, ' ');
         }
         return false;
     }
 
+    // draw animation characters
     fn draw(pts: vector(Pt), ch: u8) !void {
         for (0..pts.len()) |i| {
             const p = try pts.at(i);
@@ -89,6 +80,7 @@ const Anim = struct {
         }
     }
 
+    // setup animation object
     fn create(p: Pt, v: Pt, c: u8, col: u32, allo: std.mem.Allocator) !Anim {
         var pv: vector(Pt) = try vector(Pt).init(12, allo);
 
@@ -123,13 +115,14 @@ const Anim = struct {
         }
 
         for (0..incs.size) |_| {
-            try pv.push(p);
+            try pv.push(p.add(v).add(v));
         }
 
         return Anim{ .base = p, .pts = pv, .ch = c, .steps = 100, .color = col, .alloc = allo, .incs = incs };
     }
 };
 
+// main function
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -150,7 +143,7 @@ pub fn main() !void {
 
     try ncw.refresh();
 
-    var ch = try ncw.getch();
+    var ch = try ncw.getch(); // wait for initial key press
 
     try ncw.nodelay();
 
@@ -200,39 +193,10 @@ pub fn main() !void {
             ch = '.';
         }
 
+        // update animations
         for (0..anims.len()) |i| {
             _ = try (try anims.at(i)).nextStep();
         }
-
-        // const filter = struct {
-        //     pub fn filt(a: Anim) ?Anim {
-        //         return if (a.steps > 0) a else null;
-        //     }
-        // }.filt;
-
-        if (count % 21 == 0) {
-            const alloc = std.heap.page_allocator;
-
-            var anims_cpy = try anim_vec.init(anims.len(), alloc);
-            defer anims_cpy.destr();
-
-            for (0..anims.len()) |i| {
-                if ((try anims.at(i)).steps > 0)
-                    try anims_cpy.push((try anims.at(i)).*);
-            }
-
-            print("a:{}   ", .{anims.len()});
-
-            anims.clear();
-
-            anims = try anim_vec.init(anims_cpy.len() + 1, allocator);
-
-            for (0..anims_cpy.len()) |i| {
-                try anims.push((try anims_cpy.at(i)).*);
-            }
-        }
-
-        //        try vapply(Anim, anims_cpy, &anims, filter);
 
         // if (ch == 'w') pos.y -= 1;
         // if (ch == 's') pos.y += 1;
@@ -248,12 +212,14 @@ pub fn main() !void {
             pos.y = 0;
         }
 
+        // replace last pointer
         if (dir.x != 0) {
             key_s = '-';
         }
         if (dir.y != 0) {
             key_s = '|';
         }
+        // in case of direction change
         if (dir.y != 0 and odir.y == 0 or
             dir.y == 0 and odir.y != 0 or
             dir.x != 0 and odir.x == 0 or
@@ -266,18 +232,21 @@ pub fn main() !void {
             try ncw.col_set(@intCast(tcount % 5 + 2));
         }
 
+        // draw last pointer
         if (ncw.printch(key_s)) {} else |_| {
             print(":", .{});
         }
 
+        // update position
         pos.x += dir.x;
         pos.y += dir.y;
 
         pos = wrap_pos(pos, Pt{ .x = ncw.getCols(), .y = ncw.getLines() });
 
-        // draw new char
+        // move to new position
         try ncw.move(@intCast(pos.x), @intCast(pos.y));
 
+        // print head
         const o_col = ncw.col;
         try ncw.col_set(nc.COLOR_WHITE);
 
@@ -285,11 +254,32 @@ pub fn main() !void {
             print("_", .{});
         }
 
+        // cleanup finished animations
+        if (count % 21 == 0) {
+            if (anims.len() > 0) {
+                var anims_cpy = try anim_vec.init(anims.len() / 4 + 1, allocator);
+
+                for (0..anims.len()) |i| {
+                    if ((try anims.at(i)).steps > 0)
+                        try anims_cpy.push((try anims.at(i)).*);
+                }
+
+                anims.clear();
+                anims = anims_cpy;
+            }
+
+            try ncw.move(@intCast(0), @intCast(0));
+            const string = try std.fmt.allocPrintZ(allocator, "a:{d}  ", .{anims.len()});
+            try ncw.printline(string);
+            try ncw.move(@intCast(pos.x), @intCast(pos.y));
+        }
+
         try ncw.col_set(o_col);
 
         // move out cursor
         try ncw.move(@intCast(0), @intCast(0));
 
+        // get new character
         ch = ncw.getch() catch ch;
 
         try ncw.refresh();
@@ -299,6 +289,7 @@ pub fn main() !void {
     try ncw.endwin();
 }
 
+// wrap position around the edges
 fn wrap_pos(pos: Pt, max: Pt) Pt {
     var pps = pos;
     if (pos.y < 0) pps.y = max.y - 1;
@@ -306,4 +297,20 @@ fn wrap_pos(pos: Pt, max: Pt) Pt {
     if (pos.y >= max.y) pps.y = 0;
     if (pos.x >= max.x) pps.x = 0;
     return pps;
+}
+
+// Add two vectors
+pub fn vadd(T: type, v1: vector(T), v2: vector(T), vout: *vector(T)) !void {
+    for (0..v1.len()) |i| {
+        try vout.push(Pt.add((try v1.at(i)).*, (try v2.at(i)).*));
+    }
+}
+
+// Apply transformation to vector
+pub fn vapply(T: type, v: vector(T), vout: *vector(T), ap: (fn (T) ?T)) !void {
+    for (0..v.len()) |i| {
+        const nval = ap((try v.at(i)).*);
+        if (nval != null)
+            try vout.push(nval.?);
+    }
 }

@@ -6,9 +6,10 @@ pub const nc = @cImport(@cInclude("ncurses.h"));
 const curses_err = error{CURSES_ERR};
 
 pub const ncw = struct {
-    pub var ww: ?[*]nc.struct__win_st = undefined;
-    pub var col: u32 = undefined;
+    pub var ww: ?[*]nc.struct__win_st = undefined; // window handle
+    pub var col: u32 = undefined; // color id
 
+    // wrapper to C function with zero arguments
     pub fn wrapper0(func: fn () callconv(.C) c_int) curses_err!void {
         if (func() < 0) {
             return curses_err.CURSES_ERR;
@@ -16,12 +17,15 @@ pub const ncw = struct {
         return;
     }
 
+    // wrapper to C function with one argument + window handle
     pub fn mwrapper1(comptime T: type, func: fn ([*c]nc.struct__win_st, T) callconv(.C) c_int, val: T) curses_err!void {
         if (func(ww, val) < 0) {
             return curses_err.CURSES_ERR;
         }
         return;
     }
+
+    // wrapper to C function with two argument + window handle
     pub fn mwrapper2(comptime T: type, func: fn ([*c]nc.struct__win_st, T, T) callconv(.C) c_int, val1: T, val2: T) curses_err!void {
         if (func(ww, val1, val2) < 0) {
             return curses_err.CURSES_ERR;
@@ -97,7 +101,7 @@ pub const ncw = struct {
         return mwrapper1(c_uint, nc.waddch, ch);
     }
 
-    pub fn printline(str: [*]const u8) !void {
+    pub fn printline(str: [:0]const u8) !void {
         return if (nc.printw(str) < 0) curses_err.CURSES_ERR;
     }
 
