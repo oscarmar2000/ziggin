@@ -5,3 +5,5 @@ to build just do:
 > $ zig build
 
 in the main directory.
+
+![alt text](https://github.com/oscarmar2000/ziggin/blob/main/ziggin_prev.png?raw=true)
